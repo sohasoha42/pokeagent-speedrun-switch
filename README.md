@@ -12,6 +12,8 @@ OpenAI の視覚モデルに Nintendo Switch のキャプチャ映像を見せ�
 │   ├── detect_cameras.py   # 利用可能なカメラ番号を確認する
 │   ├── test_openai.py      # OpenAI API 接続を確認する
 │   └── test_serial.py      # 最初に見つかった COM ポートへ A を送る
+├── firmware/
+│   └── serial-hid-bridge/  # シリアル受信側マイコンコード
 ├── src/pokeagent_speedrun_switch/
 │   ├── main.py             # キャプチャ、API 呼び出し、入力送信の実行ループ
 │   └── harness.py          # プロンプト、状態保存、JSON 正規化、画像変換
