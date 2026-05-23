@@ -148,6 +148,10 @@ def call_agent(
                 "schema": {
                     "type": "object",
                     "properties": {
+                        "scene_type": {
+                            "type": "string",
+                            "enum": ["overworld", "dialog", "menu", "battle", "transition", "unclear"],
+                        },
                         "chat_message": {"type": "string"},
                         "step_details": {"type": "string"},
                         "actions": {
@@ -155,7 +159,7 @@ def call_agent(
                             "items": {"type": "object", "additionalProperties": True},
                         },
                     },
-                    "required": ["chat_message", "step_details", "actions"],
+                    "required": ["scene_type", "chat_message", "step_details", "actions"],
                     "additionalProperties": False,
                 },
                 "strict": False,
@@ -179,6 +183,7 @@ def record_step(
         {
             "step": int(state.counters.get("current_step", 0)),
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "scene_type": decision.get("scene_type", "unclear"),
             "chat_message": decision.get("chat_message", ""),
             "step_details": decision.get("step_details", ""),
             "actions": decision.get("actions", []),
@@ -194,9 +199,9 @@ def main() -> None:
     parser.add_argument("--camera-index", type=int, default=0)
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
-    parser.add_argument("--sample-every-sec", type=float, default=0.7)
-    parser.add_argument("--decision-every-sec", type=float, default=2.0)
-    parser.add_argument("--num-frames", type=int, default=3)
+    parser.add_argument("--sample-every-sec", type=float, default=0.5)
+    parser.add_argument("--decision-every-sec", type=float, default=1.0)
+    parser.add_argument("--num-frames", type=int, default=1)
     parser.add_argument("--model", type=str, default=os.getenv("OPENAI_MODEL", "gpt-5.4-mini"))
     parser.add_argument("--reasoning-effort", type=str, default=os.getenv("OPENAI_REASONING_EFFORT", "medium"))
     parser.add_argument("--detail", type=str, default="low", choices=["low", "high", "auto"])
@@ -274,6 +279,7 @@ def main() -> None:
                     )
                 except Exception as exc:
                     fallback = {
+                        "scene_type": "unclear",
                         "chat_message": "",
                         "step_details": f"agent error: {exc}",
                         "actions": [{"type": "key_press", "keys": ["WAIT"]}],

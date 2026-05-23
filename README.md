@@ -97,9 +97,9 @@ uv run pokeagent-speedrun-switch --show --serial --serial-port auto
 | `--camera-index` | `0` | OpenCV で開くカメラ番号 |
 | `--width` | `1280` | キャプチャ幅 |
 | `--height` | `720` | キャプチャ高さ |
-| `--sample-every-sec` | `0.7` | フレームをバッファへ追加する間隔 |
-| `--decision-every-sec` | `2.0` | モデルへ判断を求める間隔 |
-| `--num-frames` | `3` | 1 回の判断で使う直近フレーム数 |
+| `--sample-every-sec` | `0.5` | フレームをバッファへ追加する間隔 |
+| `--decision-every-sec` | `1.0` | モデルへ判断を求める間隔 |
+| `--num-frames` | `1` | 1 回の判断で使う直近フレーム数 |
 | `--model` | `OPENAI_MODEL` または `gpt-5.4-mini` | 使用する OpenAI モデル |
 | `--reasoning-effort` | `OPENAI_REASONING_EFFORT` または `medium` | reasoning effort |
 | `--detail` | `low` | 画像入力の detail。`low`、`high`、`auto` |

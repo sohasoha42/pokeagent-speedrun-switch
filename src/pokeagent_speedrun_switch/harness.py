@@ -33,13 +33,26 @@ SERIAL_KEY_MAP = {
     "A_UNTIL_END_OF_DIALOG": "A",
 }
 
+SCENE_TYPES = {"overworld", "dialog", "menu", "battle", "transition", "unclear"}
+
+EARLY_GAME_BOOTSTRAP_GUIDE = """
+Early-game visual route guide:
+- Opening intro/name screens: advance text and prompts normally.
+- First controllable scene is the player's bedroom. The objective is to leave the room, not inspect furniture.
+- In the bedroom, ignore the PC, TV/SNES, signs, and decorations unless a text box is already open.
+- Bedroom navigation should favor movement toward the visible stairs/exit area, usually DOWN and RIGHT from the starting area.
+- If you are in an overworld bedroom-like room with no text box, send a short movement sequence such as DOWN,DOWN,RIGHT,RIGHT,DOWN or RIGHT,DOWN,DOWN.
+- After leaving the bedroom, go downstairs, exit the house, then head north toward Route 1 / Oak's scripted stop.
+""".strip()
+
 
 HARNESS_PROMPT = """
 You are an autonomous Pokemon FireRed agent playing through a Nintendo Switch video capture.
 
 Your goal is to complete the game efficiently and reliably. You can only see screenshots, recent
 action history, persistent memory, and objectives. You do not have RAM data, so screenshots are the
-authoritative source for menus, dialogs, battles, and overworld position.
+authoritative source for menus, dialogs, battles, and overworld position. Unlike RAM-based harnesses,
+you must navigate from visual landmarks and action history.
 
 Core priorities:
 1. Progress toward becoming Champion.
@@ -52,7 +65,7 @@ Controls:
 - key_press sends one or more keys: A, B, X, Y, UP, DOWN, LEFT, RIGHT, START, SELECT, WAIT.
 - A_UNTIL_END_OF_DIALOG means press A repeatedly to advance dialog/text/battle animations.
 - Use A_UNTIL_END_OF_DIALOG instead of many individual A presses when text or battle messages are open.
-- In overworld, use direction sequences instead of one-tile moves when the path is simple.
+- In overworld, use direction sequences instead of one-tile moves when the path is simple. Moving 3-8 tiles is often better than dithering.
 - Do not use SELECT unless there is a clear reason.
 
 Visual policy:
@@ -77,8 +90,15 @@ Objective policy:
 - Objectives must explain why the goal matters and how to pursue it.
 - Do not write micro-objectives such as "press A" or "move up".
 
+Scene classification:
+- Set scene_type to exactly one of: overworld, dialog, menu, battle, transition, unclear.
+- If there is no clear text box/menu/battle UI, scene_type must be overworld or transition, not dialog.
+- In scene_type=overworld, do not output A or A_UNTIL_END_OF_DIALOG unless an explicit visible interaction target is required for progress.
+- If a bedroom/house interior is visible and no text box is open, scene_type is overworld and the action should be movement toward stairs/exits.
+
 Output JSON only, matching this shape:
 {
+  "scene_type": "overworld",
   "chat_message": "short public commentary",
   "step_details": "why these actions are appropriate now",
   "actions": [
@@ -92,7 +112,7 @@ Output JSON only, matching this shape:
 
 Rules:
 - Always include at least one key_press action unless you are only repairing invalid memory/objectives after an explicit error.
-- Keep key_press sequences short enough to recover if wrong: usually 1-8 keys, longer only in open areas.
+- Keep key_press sequences short enough to recover if wrong: usually 3-8 movement keys in simple overworld rooms/routes, 1-3 keys in menus or tight spots.
 - A_UNTIL_END_OF_DIALOG may be the only key in a key_press action.
 - Never output markdown fences or extra text outside JSON.
 """.strip()
@@ -102,7 +122,7 @@ Rules:
 class HarnessConfig:
     data_dir: Path = Path("gpt_data")
     history_limit: int = 40
-    recent_frames_in_prompt: int = 3
+    recent_frames_in_prompt: int = 1
     jpeg_quality: int = 70
     dialog_a_presses: int = 6
     inter_key_delay_sec: float = 0.08
@@ -201,6 +221,8 @@ def build_user_content(
     recent_history = state.history[-12:]
     text = {
         "current_step": int(state.counters.get("current_step", 0)),
+        "operating_mode": "visual_only_no_ram",
+        "early_game_bootstrap_guide": EARLY_GAME_BOOTSTRAP_GUIDE,
         "memory": state.memory,
         "objectives": state.objectives,
         "markers": state.markers,
@@ -243,6 +265,11 @@ def normalize_key(key: Any) -> str:
     return normalized if normalized in ALLOWED_KEYS else "WAIT"
 
 
+def normalize_scene_type(scene_type: Any) -> str:
+    normalized = str(scene_type).strip().lower()
+    return normalized if normalized in SCENE_TYPES else "unclear"
+
+
 def normalize_decision(data: dict[str, Any]) -> dict[str, Any]:
     actions = data.get("actions")
     if not isinstance(actions, list):
@@ -270,6 +297,7 @@ def normalize_decision(data: dict[str, Any]) -> dict[str, Any]:
         normalized_actions.append({"type": "key_press", "keys": ["WAIT"]})
 
     return {
+        "scene_type": normalize_scene_type(data.get("scene_type", "unclear")),
         "chat_message": str(data.get("chat_message", "")).strip(),
         "step_details": str(data.get("step_details", "")).strip(),
         "actions": normalized_actions,
@@ -337,6 +365,12 @@ def _has_recent_a_like_without_movement(history: list[dict[str, Any]], lookback:
 
 
 def _decision_has_strong_a_context(decision: dict[str, Any]) -> bool:
+    scene_type = normalize_scene_type(decision.get("scene_type", "unclear"))
+    if scene_type == "overworld":
+        return False
+    if scene_type in {"dialog", "menu", "battle"}:
+        return True
+
     text = (
         str(decision.get("chat_message", ""))
         + " "
@@ -376,16 +410,85 @@ def _decision_has_strong_a_context(decision: dict[str, Any]) -> bool:
     return any(phrase in text for phrase in positive_context)
 
 
+def _decision_has_required_overworld_interaction(decision: dict[str, Any]) -> bool:
+    text = (
+        str(decision.get("chat_message", ""))
+        + " "
+        + str(decision.get("step_details", ""))
+    ).lower()
+
+    blocked_context = (
+        "bedroom",
+        "furniture",
+        "pc",
+        "tv",
+        "snes",
+        "sign",
+        "decoration",
+        "same npc",
+        "same object",
+        "talk again",
+    )
+    if any(phrase in text for phrase in blocked_context):
+        return False
+
+    required_context = (
+        "required interaction",
+        "story interaction",
+        "starter",
+        "pokeball",
+        "professor oak",
+        "oak",
+        "confirm the highlighted",
+        "confirm the selected",
+        "interact with the door",
+        "use the stairs",
+    )
+    return any(phrase in text for phrase in required_context)
+
+
+def fallback_movement_for_recent_history(history: list[dict[str, Any]]) -> str:
+    recent_moves: list[str] = []
+    for entry in reversed(history[-6:]):
+        recent_moves.extend(key for key in _entry_keys(entry) if key in MOVEMENT_KEYS)
+
+    if not recent_moves:
+        return "DOWN"
+
+    # Bedroom/house escape tends to need down/right, but alternate when the last
+    # few attempts repeat the same direction.
+    if recent_moves[:2] == ["DOWN", "DOWN"]:
+        return "RIGHT"
+    if recent_moves[:2] == ["RIGHT", "RIGHT"]:
+        return "DOWN"
+
+    return "RIGHT" if recent_moves[0] == "DOWN" else "DOWN"
+
+
 def guard_against_reinteraction_loop(
     state: HarnessState,
     decision: dict[str, Any],
     keys: list[str],
-    fallback_move: str = "DOWN",
+    fallback_move: str | None = None,
 ) -> tuple[list[str], str | None]:
     normalized_keys = [normalize_key(key) for key in keys]
     first_action_key = next((key for key in normalized_keys if key != "WAIT"), "WAIT")
     if first_action_key not in A_LIKE_KEYS:
         return normalized_keys, None
+
+    if (
+        normalize_scene_type(decision.get("scene_type", "unclear")) == "overworld"
+        and (
+            _has_recent_a_like_without_movement(state.history)
+            or not _decision_has_required_overworld_interaction(decision)
+        )
+    ):
+        move = fallback_move or fallback_movement_for_recent_history(state.history)
+        note = (
+            "anti-loop guard replaced an A-like input with movement because the model "
+            "classified the screen as overworld without a clear required interaction"
+        )
+        return [normalize_key(move)], note
 
     if not _has_recent_a_like_without_movement(state.history):
         return normalized_keys, None
@@ -393,7 +496,7 @@ def guard_against_reinteraction_loop(
     if _decision_has_strong_a_context(decision):
         return normalized_keys, None
 
-    move = normalize_key(fallback_move)
+    move = normalize_key(fallback_move or fallback_movement_for_recent_history(state.history))
     if move not in MOVEMENT_KEYS:
         move = "DOWN"
     note = (
