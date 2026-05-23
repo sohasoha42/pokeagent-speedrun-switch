@@ -43,6 +43,22 @@ START
 SELECT
 ```
 
+方向入力は歩行できるようにボタン入力より長く保持します。既定値は以下です。
+
+```text
+button hold: 100 ms
+d-pad hold: 260 ms
+```
+
+方向入力だけ、必要に応じて `COMMAND:milliseconds` 形式で保持時間を上書きできます。
+
+```text
+DOWN:400
+RIGHT:180
+```
+
+保持時間は `40..1200 ms` に丸められます。
+
 マイコン側では次のように `SwitchControllerPico` へ変換します。
 
 | Command | SwitchControllerPico |

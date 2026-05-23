@@ -17,10 +17,13 @@ namespace {
 
 constexpr unsigned long BAUD_RATE = 115200;
 constexpr uint16_t BUTTON_PRESS_MS = 100;
+constexpr uint16_t HAT_PRESS_MS = 260;
 constexpr uint16_t COMMAND_GAP_MS = 20;
 constexpr size_t MAX_COMMAND_LENGTH = 32;
 constexpr int UART_TX_PIN = 0;  // GP0: Pico -> USB serial adapter RX
 constexpr int UART_RX_PIN = 1;  // GP1: USB serial adapter TX -> Pico
+constexpr uint16_t MIN_HOLD_MS = 40;
+constexpr uint16_t MAX_HOLD_MS = 1200;
 
 String pending_command;
 
@@ -50,15 +53,48 @@ bool sendButtonCommand(const String& command) {
   return true;
 }
 
-bool sendHatCommand(const String& command) {
+uint16_t clampHoldMs(long hold_ms) {
+  if (hold_ms < MIN_HOLD_MS) {
+    return MIN_HOLD_MS;
+  }
+  if (hold_ms > MAX_HOLD_MS) {
+    return MAX_HOLD_MS;
+  }
+  return static_cast<uint16_t>(hold_ms);
+}
+
+bool parseTimedCommand(const String& command, String& base_command, uint16_t& hold_ms) {
+  const int separator = command.indexOf(':');
+  if (separator < 0) {
+    base_command = command;
+    return true;
+  }
+
+  base_command = command.substring(0, separator);
+  const String hold_text = command.substring(separator + 1);
+  if (base_command.length() == 0 || hold_text.length() == 0) {
+    return false;
+  }
+
+  for (size_t i = 0; i < hold_text.length(); ++i) {
+    if (!isDigit(hold_text[i])) {
+      return false;
+    }
+  }
+
+  hold_ms = clampHoldMs(hold_text.toInt());
+  return true;
+}
+
+bool sendHatCommand(const String& command, uint16_t hold_ms) {
   if (command == "UP") {
-    pushHatButton(Hat::UP, BUTTON_PRESS_MS, 1);
+    pushHatButton(Hat::UP, hold_ms, 1);
   } else if (command == "DOWN") {
-    pushHatButton(Hat::DOWN, BUTTON_PRESS_MS, 1);
+    pushHatButton(Hat::DOWN, hold_ms, 1);
   } else if (command == "LEFT") {
-    pushHatButton(Hat::LEFT, BUTTON_PRESS_MS, 1);
+    pushHatButton(Hat::LEFT, hold_ms, 1);
   } else if (command == "RIGHT") {
-    pushHatButton(Hat::RIGHT, BUTTON_PRESS_MS, 1);
+    pushHatButton(Hat::RIGHT, hold_ms, 1);
   } else {
     return false;
   }
@@ -67,12 +103,18 @@ bool sendHatCommand(const String& command) {
 }
 
 bool executeCommand(const String& command) {
-  if (command == "WAIT") {
+  String base_command;
+  uint16_t hold_ms = HAT_PRESS_MS;
+  if (!parseTimedCommand(command, base_command, hold_ms)) {
+    return false;
+  }
+
+  if (base_command == "WAIT") {
     delay(BUTTON_PRESS_MS);
     return true;
   }
 
-  if (command == "A_UNTIL_END_OF_DIALOG") {
+  if (base_command == "A_UNTIL_END_OF_DIALOG") {
     for (int i = 0; i < 6; ++i) {
       pushButton(Button::A, BUTTON_PRESS_MS, 1);
       delay(COMMAND_GAP_MS);
@@ -80,7 +122,7 @@ bool executeCommand(const String& command) {
     return true;
   }
 
-  return sendButtonCommand(command) || sendHatCommand(command);
+  return sendButtonCommand(base_command) || sendHatCommand(base_command, hold_ms);
 }
 
 void handleCommand(String raw_command) {
