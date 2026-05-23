@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from serial.tools import list_ports
 
+from .camera import open_camera, usable_camera_indices
 from .harness import (
     HARNESS_PROMPT,
     HarnessConfig,
@@ -79,20 +80,6 @@ def execute_keys(
         time.sleep(config.inter_key_delay_sec)
 
 
-def _open_capture_index(camera_index: int, width: int, height: int) -> cv2.VideoCapture | None:
-    cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
-    if not cap.isOpened():
-        cap.release()
-        cap = cv2.VideoCapture(camera_index)
-    if not cap.isOpened():
-        cap.release()
-        return None
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    return cap
-
-
 def open_capture(camera_index: str, width: int, height: int) -> cv2.VideoCapture:
     if camera_index.lower() != "auto":
         try:
@@ -100,23 +87,19 @@ def open_capture(camera_index: str, width: int, height: int) -> cv2.VideoCapture
         except ValueError:
             raise RuntimeError("--camera-index must be an integer or 'auto'") from None
 
-        cap = _open_capture_index(index, width, height)
+        cap = open_camera(index, width, height)
         if cap is None:
             raise RuntimeError(f"Could not open camera_index={index}")
         print(f"camera opened: index {index}", flush=True)
         return cap
 
-    for index in range(10):
-        cap = _open_capture_index(index, width, height)
-        if cap is None:
-            continue
-
-        ret, frame = cap.read()
-        if ret and frame is not None:
-            print(f"camera opened: index {index}", flush=True)
+    indices = usable_camera_indices()
+    if indices:
+        index = indices[0]
+        cap = open_camera(index, width, height)
+        if cap is not None:
+            print(f"camera opened: index {index} (available: {indices})", flush=True)
             return cap
-
-        cap.release()
 
     raise RuntimeError("No usable camera found. Try --camera-index with a known device index.")
 
