@@ -54,7 +54,7 @@ OPENAI_REASONING_EFFORT=medium
 
 ## 起動
 
-まずキャプチャデバイスの番号を確認します。
+通常はキャプチャデバイスを自動検出します。検出がうまくいかない場合は、カメラ番号を確認します。
 
 ```powershell
 uv run python scripts/detect_cameras.py
@@ -63,13 +63,13 @@ uv run python scripts/detect_cameras.py
 入力を送信せず、判断内容だけを確認する場合:
 
 ```powershell
-uv run pokeagent-speedrun-switch --camera-index 0 --dry-run
+uv run pokeagent-speedrun-switch --dry-run
 ```
 
 シリアル入力ブリッジへ送信する場合:
 
 ```powershell
-uv run pokeagent-speedrun-switch --camera-index 0 --serial --serial-port COM3
+uv run pokeagent-speedrun-switch --serial --serial-port COM3
 ```
 
 COM ポートを自動検出する場合:
@@ -92,7 +92,7 @@ uv run pokeagent-speedrun-switch --serial --serial-port auto
 
 | オプション | 既定値 | 内容 |
 | --- | --- | --- |
-| `--camera-index` | `0` | OpenCV で開くカメラ番号 |
+| `--camera-index` | `auto` | OpenCV で開くカメラ番号。`auto` なら利用可能なカメラを自動検出 |
 | `--width` | `1280` | キャプチャ幅 |
 | `--height` | `720` | キャプチャ高さ |
 | `--sample-every-sec` | `0.5` | フレームをバッファへ追加する間隔 |
