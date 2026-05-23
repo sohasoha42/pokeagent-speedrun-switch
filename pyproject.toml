@@ -8,6 +8,7 @@ dependencies = [
     "numpy>=2.4.4",
     "openai>=2.32.0",
     "opencv-python>=4.13.0.92",
+    "pyserial>=3.5",
     "python-dotenv>=1.2.2",
 ]
 
