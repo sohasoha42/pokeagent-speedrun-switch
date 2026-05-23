@@ -19,6 +19,7 @@ from .harness import (
     HARNESS_PROMPT,
     HarnessConfig,
     HarnessState,
+    MOVEMENT_KEYS,
     apply_metadata_actions,
     build_visual_change_summary,
     build_user_content,
@@ -55,6 +56,14 @@ def send_hid_key(ser: serial.Serial, key: str) -> None:
     ser.flush()
 
 
+def serial_commands_for_key(key: str, config: HarnessConfig) -> list[str]:
+    if key in MOVEMENT_KEYS:
+        turn_hold_ms = int(config.dpad_turn_hold_sec * 1000)
+        step_hold_ms = int(config.dpad_step_hold_sec * config.dpad_steps_per_move * 1000)
+        return [f"{key}:{turn_hold_ms}", f"{key}:{step_hold_ms}"]
+    return [key]
+
+
 def execute_keys(
     ser: serial.Serial | None,
     keys: list[str],
@@ -76,9 +85,11 @@ def execute_keys(
             continue
 
         if dry_run or ser is None:
-            print(f"would send HID: {key}", flush=True)
+            for command in serial_commands_for_key(key, config):
+                print(f"would send HID: {command}", flush=True)
         else:
-            send_hid_key(ser, key)
+            for command in serial_commands_for_key(key, config):
+                send_hid_key(ser, command)
         time.sleep(config.inter_key_delay_sec)
 
 
@@ -212,6 +223,9 @@ def main() -> None:
     parser.add_argument("--serial-baud", type=int, default=115200)
     parser.add_argument("--data-dir", type=Path, default=Path("gpt_data"))
     parser.add_argument("--dialog-a-presses", type=int, default=6)
+    parser.add_argument("--dpad-turn-hold-sec", type=float, default=0.08)
+    parser.add_argument("--dpad-step-hold-sec", type=float, default=0.38)
+    parser.add_argument("--dpad-steps-per-move", type=int, default=1)
     args = parser.parse_args()
 
     api_key = os.getenv("OPENAI_API_KEY")
@@ -222,6 +236,9 @@ def main() -> None:
         data_dir=args.data_dir,
         dialog_a_presses=args.dialog_a_presses,
         recent_frames_in_prompt=args.num_frames,
+        dpad_turn_hold_sec=args.dpad_turn_hold_sec,
+        dpad_step_hold_sec=args.dpad_step_hold_sec,
+        dpad_steps_per_move=args.dpad_steps_per_move,
     )
     state = load_state(harness_config)
     client = OpenAI(api_key=api_key)

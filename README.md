@@ -82,7 +82,7 @@ uv run pokeagent-speedrun-switch --serial --serial-port auto
 
 1. OpenCV がキャプチャデバイスからフレームを取得します。
 2. 指定間隔で直近フレームをためます。
-3. フレーム、画面下部の切り抜き、履歴、メモリ、目標を OpenAI Responses API へ送ります。
+3. フルスクリーンのフレーム、履歴、メモリ、目標を OpenAI Responses API へ送ります。
 4. モデルは `chat_message`、`step_details`、`actions` を含む JSON を返します。
 5. `actions` のうち `key_press` がキー列へ変換されます。
 6. `--serial` が有効ならシリアルポートへ送信します。無効または `--dry-run` なら標準出力へ表示します。
@@ -107,6 +107,9 @@ uv run pokeagent-speedrun-switch --serial --serial-port auto
 | `--serial-baud` | `115200` | シリアル通信速度 |
 | `--data-dir` | `gpt_data` | 状態ファイルの保存先 |
 | `--dialog-a-presses` | `6` | `A_UNTIL_END_OF_DIALOG` を A 何回分として送るか |
+| `--dpad-turn-hold-sec` | `0.08` | 方向転換用の短い保持秒数 |
+| `--dpad-step-hold-sec` | `0.38` | 方向入力 1 歩分の保持秒数 |
+| `--dpad-steps-per-move` | `1` | 方向入力 1 コマンドで進める歩数。既定では `UP` を `UP:80`, `UP:380` として送信 |
 
 ## モデルが使えるキー
 
