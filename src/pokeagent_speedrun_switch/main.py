@@ -20,6 +20,7 @@ from .harness import (
     HarnessState,
     apply_metadata_actions,
     build_user_content,
+    guard_against_reinteraction_loop,
     key_sequence_from_actions,
     load_state,
     normalize_decision,
@@ -256,6 +257,12 @@ def main() -> None:
                     )
                     apply_metadata_actions(state, decision["actions"])
                     keys = key_sequence_from_actions(decision["actions"])
+                    keys, guard_note = guard_against_reinteraction_loop(state, decision, keys)
+                    if guard_note:
+                        decision["step_details"] = (
+                            (decision.get("step_details") or "").rstrip()
+                            + f" [{guard_note}]"
+                        ).strip()
                     execute_keys(ser, keys, harness_config, args.dry_run or not args.serial)
                     record_step(state, decision, keys)
                     save_state(harness_config, state)

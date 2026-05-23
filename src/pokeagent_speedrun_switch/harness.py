@@ -26,6 +26,9 @@ ALLOWED_KEYS = {
     "A_UNTIL_END_OF_DIALOG",
 }
 
+MOVEMENT_KEYS = {"UP", "DOWN", "LEFT", "RIGHT"}
+A_LIKE_KEYS = {"A", "A_UNTIL_END_OF_DIALOG"}
+
 SERIAL_KEY_MAP = {
     "A_UNTIL_END_OF_DIALOG": "A",
 }
@@ -57,6 +60,13 @@ Visual policy:
 - If no clear text/menu is visible, treat the scene as overworld and prefer movement over A.
 - Use A only for a direct interaction when the player is clearly facing an NPC/object/door/item or confirming a highlighted choice.
 - If recent screenshots look unchanged after the same input, change strategy.
+
+Interaction loop policy:
+- Talking to an NPC, reading a sign, checking an object, or opening a one-shot message is complete once its text box disappears.
+- If the current screen is overworld and recent history already used A or A_UNTIL_END_OF_DIALOG to talk/check/read, do not press A again while still facing the same person or object.
+- After finishing dialog with a person/object, the next overworld action should usually be movement away from that target or toward the route/objective.
+- Repeatedly talking to the same target is allowed only when a visible prompt/menu/choice requires confirmation, or when an objective explicitly says repeated interaction is required.
+- If unsure whether a conversation just ended, choose a short movement input instead of A.
 
 Memory policy:
 - Use memory for persistent knowledge not visible in screenshots: route notes, puzzle findings, save context, boss lessons, menu lessons.
@@ -306,3 +316,89 @@ def key_sequence_from_actions(actions: list[dict[str, Any]]) -> list[str]:
         for key in action.get("keys", []):
             keys.append(normalize_key(key))
     return keys or ["WAIT"]
+
+
+def _entry_keys(entry: dict[str, Any]) -> list[str]:
+    raw_keys = entry.get("keys", [])
+    if not isinstance(raw_keys, list):
+        return []
+    return [normalize_key(key) for key in raw_keys]
+
+
+def _has_recent_a_like_without_movement(history: list[dict[str, Any]], lookback: int = 4) -> bool:
+    saw_a_like = False
+    for entry in reversed(history[-lookback:]):
+        keys = _entry_keys(entry)
+        if any(key in MOVEMENT_KEYS for key in keys):
+            return False
+        if any(key in A_LIKE_KEYS for key in keys):
+            saw_a_like = True
+    return saw_a_like
+
+
+def _decision_has_strong_a_context(decision: dict[str, Any]) -> bool:
+    text = (
+        str(decision.get("chat_message", ""))
+        + " "
+        + str(decision.get("step_details", ""))
+    ).lower()
+
+    negative_context = (
+        "no dialog",
+        "no text",
+        "no menu",
+        "nothing to advance",
+        "overworld",
+        "facing an npc",
+        "facing a person",
+        "facing an object",
+        "talk to",
+        "interact with",
+    )
+    if any(phrase in text for phrase in negative_context):
+        return False
+
+    positive_context = (
+        "clear dialog",
+        "dialogue box",
+        "text box",
+        "battle text",
+        "continuation arrow",
+        "confirmation",
+        "confirm",
+        "choice",
+        "prompt",
+        "menu",
+        "keyboard",
+        "naming",
+        "yes/no",
+    )
+    return any(phrase in text for phrase in positive_context)
+
+
+def guard_against_reinteraction_loop(
+    state: HarnessState,
+    decision: dict[str, Any],
+    keys: list[str],
+    fallback_move: str = "DOWN",
+) -> tuple[list[str], str | None]:
+    normalized_keys = [normalize_key(key) for key in keys]
+    first_action_key = next((key for key in normalized_keys if key != "WAIT"), "WAIT")
+    if first_action_key not in A_LIKE_KEYS:
+        return normalized_keys, None
+
+    if not _has_recent_a_like_without_movement(state.history):
+        return normalized_keys, None
+
+    if _decision_has_strong_a_context(decision):
+        return normalized_keys, None
+
+    move = normalize_key(fallback_move)
+    if move not in MOVEMENT_KEYS:
+        move = "DOWN"
+    note = (
+        "anti-loop guard replaced an A-like input with movement because recent history "
+        "already used A/A_UNTIL_END_OF_DIALOG and the new decision did not cite a clear "
+        "dialog, prompt, menu, or confirmation context"
+    )
+    return [move], note
