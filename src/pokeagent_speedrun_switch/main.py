@@ -20,8 +20,10 @@ from .harness import (
     HarnessConfig,
     HarnessState,
     apply_metadata_actions,
+    build_visual_change_summary,
     build_user_content,
     guard_against_reinteraction_loop,
+    guard_against_stagnation,
     key_sequence_from_actions,
     load_state,
     normalize_decision,
@@ -174,6 +176,7 @@ def record_step(
     state: HarnessState,
     decision: dict[str, Any],
     keys: list[str],
+    visual_summary: dict[str, Any],
     error: str | None = None,
 ) -> None:
     state.history.append(
@@ -185,6 +188,7 @@ def record_step(
             "step_details": decision.get("step_details", ""),
             "actions": decision.get("actions", []),
             "keys": keys,
+            "visual_change_summary": visual_summary,
             "error": error,
         }
     )
@@ -198,7 +202,7 @@ def main() -> None:
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--sample-every-sec", type=float, default=0.5)
     parser.add_argument("--decision-every-sec", type=float, default=1.0)
-    parser.add_argument("--num-frames", type=int, default=1)
+    parser.add_argument("--num-frames", type=int, default=3)
     parser.add_argument("--model", type=str, default=os.getenv("OPENAI_MODEL", "gpt-5.4-mini"))
     parser.add_argument("--reasoning-effort", type=str, default=os.getenv("OPENAI_REASONING_EFFORT", "medium"))
     parser.add_argument("--detail", type=str, default="low", choices=["low", "high", "auto"])
@@ -246,6 +250,7 @@ def main() -> None:
             ready = len(frame_buffer) == args.num_frames
             due = now - last_decision_ts >= args.decision_every_sec
             if ready and due:
+                visual_summary = build_visual_change_summary(list(frame_buffer))
                 try:
                     decision = call_agent(
                         client=client,
@@ -258,14 +263,18 @@ def main() -> None:
                     )
                     apply_metadata_actions(state, decision["actions"])
                     keys = key_sequence_from_actions(decision["actions"])
+                    keys, stagnation_note = guard_against_stagnation(state, keys, visual_summary)
                     keys, guard_note = guard_against_reinteraction_loop(state, decision, keys)
-                    if guard_note:
+                    guard_notes = [note for note in [stagnation_note, guard_note] if note]
+                    if guard_notes:
                         decision["step_details"] = (
                             (decision.get("step_details") or "").rstrip()
-                            + f" [{guard_note}]"
+                            + " ["
+                            + " | ".join(guard_notes)
+                            + "]"
                         ).strip()
                     execute_keys(ser, keys, harness_config, args.dry_run or not args.serial)
-                    record_step(state, decision, keys)
+                    record_step(state, decision, keys, visual_summary)
                     save_state(harness_config, state)
                     last_keys = keys
                     last_status = decision.get("step_details") or decision.get("chat_message") or "acted"
@@ -280,7 +289,7 @@ def main() -> None:
                         "step_details": f"agent error: {exc}",
                         "actions": [{"type": "key_press", "keys": ["WAIT"]}],
                     }
-                    record_step(state, fallback, ["WAIT"], error=str(exc))
+                    record_step(state, fallback, ["WAIT"], visual_summary, error=str(exc))
                     save_state(harness_config, state)
                     last_status = f"error: {exc}"
                     print(last_status, flush=True)

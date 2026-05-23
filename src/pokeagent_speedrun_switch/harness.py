@@ -73,6 +73,10 @@ Visual policy:
 - If no clear text/menu is visible, treat the scene as overworld and prefer movement over A.
 - Use A only for a direct interaction when the player is clearly facing an NPC/object/door/item or confirming a highlighted choice.
 - If recent screenshots look unchanged after the same input, change strategy.
+- Images are provided in chronological order, oldest to newest. Judge the newest frame, but use older frames to detect whether dialog disappeared, whether movement happened, or whether the scene is stuck.
+- Do not assume dialog is still active just because prior frames or history had dialog. The newest frame must visibly contain a text box/menu/battle prompt to classify as dialog/menu/battle.
+- If visual_change_summary says the latest frames changed very little after repeated A-like inputs, avoid more A unless a visible continuation arrow or prompt remains in the newest frame.
+- If stagnation_summary.is_stagnant is true, deliberately choose a different tactic from recent_history: change movement direction, back out with B if in a menu, or wait only for transitions. Do not repeat the same key sequence.
 
 Interaction loop policy:
 - Talking to an NPC, reading a sign, checking an object, or opening a one-shot message is complete once its text box disappears.
@@ -122,7 +126,7 @@ Rules:
 class HarnessConfig:
     data_dir: Path = Path("gpt_data")
     history_limit: int = 40
-    recent_frames_in_prompt: int = 1
+    recent_frames_in_prompt: int = 3
     jpeg_quality: int = 70
     dialog_a_presses: int = 6
     inter_key_delay_sec: float = 0.08
@@ -197,6 +201,81 @@ def crop_dialog_area(frame: np.ndarray) -> np.ndarray:
     return frame[int(h * 0.60) : int(h * 0.99), int(w * 0.02) : int(w * 0.98)]
 
 
+def frame_difference_ratio(previous: np.ndarray, current: np.ndarray) -> float:
+    prev_gray = cv2.cvtColor(previous, cv2.COLOR_BGR2GRAY)
+    curr_gray = cv2.cvtColor(current, cv2.COLOR_BGR2GRAY)
+    if prev_gray.shape != curr_gray.shape:
+        curr_gray = cv2.resize(curr_gray, (prev_gray.shape[1], prev_gray.shape[0]))
+    diff = cv2.absdiff(prev_gray, curr_gray)
+    return float(np.mean(diff) / 255.0)
+
+
+def build_visual_change_summary(frames: list[np.ndarray]) -> dict[str, Any]:
+    selected = frames[-min(len(frames), 5) :]
+    diffs = [
+        round(frame_difference_ratio(previous, current), 4)
+        for previous, current in zip(selected, selected[1:])
+    ]
+    if not diffs:
+        trend = "single_frame_only"
+    elif max(diffs) < 0.01:
+        trend = "nearly_static"
+    elif max(diffs) < 0.04:
+        trend = "small_changes"
+    else:
+        trend = "changed"
+    return {
+        "frames_available": len(frames),
+        "frames_sent": len(frames),
+        "oldest_to_newest_diff_ratios": diffs,
+        "trend": trend,
+    }
+
+
+def is_low_visual_change(summary: dict[str, Any]) -> bool:
+    trend = str(summary.get("trend", ""))
+    if trend in {"nearly_static", "single_frame_only"}:
+        return True
+    diffs = summary.get("oldest_to_newest_diff_ratios", [])
+    if not isinstance(diffs, list) or not diffs:
+        return False
+    numeric_diffs = [float(value) for value in diffs if isinstance(value, int | float)]
+    return bool(numeric_diffs) and max(numeric_diffs) < 0.015
+
+
+def build_stagnation_summary(
+    history: list[dict[str, Any]],
+    current_visual_summary: dict[str, Any],
+    lookback: int = 5,
+) -> dict[str, Any]:
+    recent = history[-lookback:]
+    low_change_entries = [
+        entry for entry in recent if is_low_visual_change(entry.get("visual_change_summary", {}))
+    ]
+    recent_keys = [key for entry in recent for key in _entry_keys(entry)]
+    recent_non_wait_keys = [key for key in recent_keys if key != "WAIT"]
+
+    repeated_key = None
+    if len(recent_non_wait_keys) >= 3 and len(set(recent_non_wait_keys[-3:])) == 1:
+        repeated_key = recent_non_wait_keys[-1]
+
+    a_like_count = sum(1 for key in recent_non_wait_keys if key in A_LIKE_KEYS)
+    movement_count = sum(1 for key in recent_non_wait_keys if key in MOVEMENT_KEYS)
+    low_change_now = is_low_visual_change(current_visual_summary)
+    stagnant = low_change_now and (
+        len(low_change_entries) >= 2 or repeated_key is not None or a_like_count >= 2
+    )
+
+    return {
+        "is_stagnant": stagnant,
+        "low_change_recent_steps": len(low_change_entries),
+        "low_change_now": low_change_now,
+        "repeated_recent_key": repeated_key,
+        "recent_a_like_count": a_like_count,
+        "recent_movement_count": movement_count,
+    }
+
+
 def parse_json_safely(text: str) -> dict[str, Any]:
     stripped = text.strip()
     try:
@@ -219,10 +298,13 @@ def build_user_content(
     detail: str,
 ) -> list[dict[str, Any]]:
     recent_history = state.history[-12:]
+    visual_change_summary = build_visual_change_summary(frames)
     text = {
         "current_step": int(state.counters.get("current_step", 0)),
         "operating_mode": "visual_only_no_ram",
         "early_game_bootstrap_guide": EARLY_GAME_BOOTSTRAP_GUIDE,
+        "visual_change_summary": visual_change_summary,
+        "stagnation_summary": build_stagnation_summary(state.history, visual_change_summary),
         "memory": state.memory,
         "objectives": state.objectives,
         "markers": state.markers,
@@ -463,6 +545,52 @@ def fallback_movement_for_recent_history(history: list[dict[str, Any]]) -> str:
         return "DOWN"
 
     return "RIGHT" if recent_moves[0] == "DOWN" else "DOWN"
+
+
+def alternate_key_for_stagnation(history: list[dict[str, Any]], keys: list[str]) -> str | None:
+    recent_keys = [key for entry in history[-5:] for key in _entry_keys(entry) if key != "WAIT"]
+    current_non_wait = [key for key in keys if key != "WAIT"]
+    if not recent_keys or not current_non_wait:
+        return None
+
+    current_first = current_non_wait[0]
+    if len(recent_keys) >= 2 and recent_keys[-1] == current_first and recent_keys[-2] == current_first:
+        if current_first in A_LIKE_KEYS:
+            return fallback_movement_for_recent_history(history)
+        if current_first in MOVEMENT_KEYS:
+            alternatives = {
+                "UP": "RIGHT",
+                "RIGHT": "DOWN",
+                "DOWN": "LEFT",
+                "LEFT": "UP",
+            }
+            return alternatives[current_first]
+
+    return None
+
+
+def guard_against_stagnation(
+    state: HarnessState,
+    keys: list[str],
+    visual_summary: dict[str, Any],
+) -> tuple[list[str], str | None]:
+    normalized_keys = [normalize_key(key) for key in keys]
+    stagnation = build_stagnation_summary(state.history, visual_summary)
+    if not stagnation["is_stagnant"]:
+        return normalized_keys, None
+
+    replacement = alternate_key_for_stagnation(state.history, normalized_keys)
+    if replacement is None and any(key in A_LIKE_KEYS for key in normalized_keys):
+        replacement = fallback_movement_for_recent_history(state.history)
+
+    if replacement is None:
+        return normalized_keys, None
+
+    note = (
+        "stagnation guard changed the action because recent history and visual "
+        f"diffs indicate little progress: {stagnation}"
+    )
+    return [normalize_key(replacement)], note
 
 
 def guard_against_reinteraction_loop(
