@@ -40,8 +40,10 @@ Early-game visual route guide:
 - Opening intro/name screens: advance text and prompts normally.
 - First controllable scene is the player's bedroom. The objective is to leave the room, not inspect furniture.
 - In the bedroom, ignore the PC, TV/SNES, signs, and decorations unless a text box is already open.
-- Bedroom navigation should favor movement toward the visible stairs/exit area, usually DOWN and RIGHT from the starting area.
-- If you are in an overworld bedroom-like room with no text box, send a short movement sequence such as DOWN,DOWN,RIGHT,RIGHT,DOWN or RIGHT,DOWN,DOWN.
+- Bedroom stairs in FireRed are a dark stair/doorway tile on the room edge, often toward the right/upper-right side of the room. Treat dark stair-like edge tiles as the exit target, not as an NPC/sign/object to inspect.
+- Bedroom navigation should use visual landmarks: first locate the player, then identify likely stairs/door tiles on the room edge, then move toward that target.
+- If you are in an overworld bedroom-like room with no text box, do not inspect objects. Move toward the most plausible stair/exit tile with a short route such as RIGHT,RIGHT,UP or RIGHT,UP,UP when the exit appears above/right, or another route justified by the newest screenshot.
+- If a route does not visibly change position, mark that direction as likely blocked in step_details and try a different route. Do not keep following a hard-coded direction pattern.
 - After leaving the bedroom, go downstairs, exit the house, then head north toward Route 1 / Oak's scripted stop.
 """.strip()
 
@@ -77,6 +79,7 @@ Visual policy:
 - Do not assume dialog is still active just because prior frames or history had dialog. The newest frame must visibly contain a text box/menu/battle prompt to classify as dialog/menu/battle.
 - If visual_change_summary says the latest frames changed very little after repeated A-like inputs, avoid more A unless a visible continuation arrow or prompt remains in the newest frame.
 - If stagnation_summary.is_stagnant is true, deliberately choose a different tactic from recent_history: change movement direction, back out with B if in a menu, or wait only for transitions. Do not repeat the same key sequence.
+- Because this harness has no RAM/minimap, use screenshot-based local exploration: infer likely walkable tiles, test a short route, use visual changes to update which directions are blocked, and prefer exits/stairs/doors over interacting with furniture.
 
 Interaction loop policy:
 - Talking to an NPC, reading a sign, checking an object, or opening a one-shot message is complete once its text box disappears.
@@ -131,6 +134,9 @@ class HarnessConfig:
     dialog_a_presses: int = 6
     inter_key_delay_sec: float = 0.08
     dialog_key_delay_sec: float = 0.18
+    dpad_turn_hold_sec: float = 0.08
+    dpad_step_hold_sec: float = 0.38
+    dpad_steps_per_move: int = 1
 
 
 @dataclass
@@ -194,11 +200,6 @@ def to_data_url_bgr(frame: np.ndarray, jpeg_quality: int = 70) -> str:
         raise RuntimeError("JPEG encode failed")
     b64 = base64.b64encode(buf.tobytes()).decode("utf-8")
     return f"data:image/jpeg;base64,{b64}"
-
-
-def crop_dialog_area(frame: np.ndarray) -> np.ndarray:
-    h, w = frame.shape[:2]
-    return frame[int(h * 0.60) : int(h * 0.99), int(w * 0.02) : int(w * 0.98)]
 
 
 def frame_difference_ratio(previous: np.ndarray, current: np.ndarray) -> float:
@@ -326,14 +327,6 @@ def build_user_content(
             {
                 "type": "input_image",
                 "image_url": to_data_url_bgr(frame, config.jpeg_quality),
-                "detail": detail,
-            }
-        )
-        content.append({"type": "input_text", "text": f"frame_{idx}: bottom dialog/menu area"})
-        content.append(
-            {
-                "type": "input_image",
-                "image_url": to_data_url_bgr(crop_dialog_area(frame), config.jpeg_quality),
                 "detail": detail,
             }
         )
@@ -537,14 +530,17 @@ def fallback_movement_for_recent_history(history: list[dict[str, Any]]) -> str:
     if not recent_moves:
         return "DOWN"
 
-    # Bedroom/house escape tends to need down/right, but alternate when the last
-    # few attempts repeat the same direction.
-    if recent_moves[:2] == ["DOWN", "DOWN"]:
-        return "RIGHT"
-    if recent_moves[:2] == ["RIGHT", "RIGHT"]:
-        return "DOWN"
+    for candidate in ("DOWN", "RIGHT", "UP", "LEFT"):
+        if candidate not in recent_moves[:4]:
+            return candidate
 
-    return "RIGHT" if recent_moves[0] == "DOWN" else "DOWN"
+    alternatives = {
+        "UP": "RIGHT",
+        "RIGHT": "DOWN",
+        "DOWN": "LEFT",
+        "LEFT": "UP",
+    }
+    return alternatives.get(recent_moves[0], "RIGHT")
 
 
 def alternate_key_for_stagnation(history: list[dict[str, Any]], keys: list[str]) -> str | None:
