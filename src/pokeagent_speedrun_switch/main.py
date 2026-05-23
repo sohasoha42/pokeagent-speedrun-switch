@@ -91,22 +91,6 @@ def open_capture(camera_index: int, width: int, height: int) -> cv2.VideoCapture
     return cap
 
 
-def draw_overlay(frame: np.ndarray, status_lines: list[str]) -> None:
-    y = 30
-    for line in status_lines:
-        cv2.putText(
-            frame,
-            line,
-            (20, y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (0, 255, 0),
-            2,
-            cv2.LINE_AA,
-        )
-        y += 30
-
-
 def response_text(resp: Any) -> str:
     text = getattr(resp, "output_text", None)
     if text:
@@ -205,7 +189,6 @@ def main() -> None:
     parser.add_argument("--model", type=str, default=os.getenv("OPENAI_MODEL", "gpt-5.4-mini"))
     parser.add_argument("--reasoning-effort", type=str, default=os.getenv("OPENAI_REASONING_EFFORT", "medium"))
     parser.add_argument("--detail", type=str, default="low", choices=["low", "high", "auto"])
-    parser.add_argument("--show", action="store_true")
     parser.add_argument("--serial", action="store_true", help="Send selected keys to the serial controller bridge.")
     parser.add_argument("--dry-run", action="store_true", help="Plan actions but do not send serial inputs.")
     parser.add_argument("--serial-port", type=str, default="auto")
@@ -290,29 +273,10 @@ def main() -> None:
                     print(last_status, flush=True)
                 finally:
                     last_decision_ts = now
-
-            if args.show:
-                preview = frame.copy()
-                draw_overlay(
-                    preview,
-                    [
-                        f"model: {args.model}",
-                        f"step: {state.counters.get('current_step', 0)}",
-                        f"frames: {len(frame_buffer)}/{args.num_frames}",
-                        f"keys: {' '.join(last_keys) if last_keys else '-'}",
-                        last_status[:90],
-                        "ESC: quit",
-                    ],
-                )
-                cv2.imshow("pokeagent-speedrun-switch", preview)
-                key = cv2.waitKey(1) & 0xFF
-                if key == 27:
-                    break
     finally:
         if ser is not None:
             ser.close()
         cap.release()
-        cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

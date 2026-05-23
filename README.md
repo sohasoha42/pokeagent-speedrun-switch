@@ -63,22 +63,20 @@ uv run python scripts/detect_cameras.py
 入力を送信せず、判断内容だけを確認する場合:
 
 ```powershell
-uv run pokeagent-speedrun-switch --camera-index 0 --show --dry-run
+uv run pokeagent-speedrun-switch --camera-index 0 --dry-run
 ```
 
 シリアル入力ブリッジへ送信する場合:
 
 ```powershell
-uv run pokeagent-speedrun-switch --camera-index 0 --show --serial --serial-port COM3
+uv run pokeagent-speedrun-switch --camera-index 0 --serial --serial-port COM3
 ```
 
 COM ポートを自動検出する場合:
 
 ```powershell
-uv run pokeagent-speedrun-switch --show --serial --serial-port auto
+uv run pokeagent-speedrun-switch --serial --serial-port auto
 ```
-
-プレビュー画面は `Esc` で閉じます。
 
 ## 実行時の流れ
 
@@ -103,7 +101,6 @@ uv run pokeagent-speedrun-switch --show --serial --serial-port auto
 | `--model` | `OPENAI_MODEL` または `gpt-5.4-mini` | 使用する OpenAI モデル |
 | `--reasoning-effort` | `OPENAI_REASONING_EFFORT` または `medium` | reasoning effort |
 | `--detail` | `low` | 画像入力の detail。`low`、`high`、`auto` |
-| `--show` | 無効 | プレビューウィンドウを表示 |
 | `--serial` | 無効 | シリアルポートへ入力を送信 |
 | `--dry-run` | 無効 | 入力を送信せず、送信予定のキーだけ表示 |
 | `--serial-port` | `auto` | 使用する COM ポート |
