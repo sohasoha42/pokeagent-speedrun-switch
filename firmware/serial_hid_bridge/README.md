@@ -1,4 +1,4 @@
-# serial-hid-bridge
+# serial_hid_bridge
 
 PC 側の `pokeagent-speedrun-switch --serial` から送られる 1 行コマンドを Raspberry Pi Pico で受信し、Nintendo Switch 用の USB HID 入力へ変換するファームウェアです。
 
@@ -74,10 +74,11 @@ RIGHT:180
 | `START` | `Button::PLUS` |
 | `SELECT` | `Button::MINUS` |
 
-`WAIT` と `A_UNTIL_END_OF_DIALOG` も受信できるようにしていますが、通常は PC 側で処理されます。
+`WAIT` も受信できますが、通常は PC 側で処理されます。
 
 - `WAIT`: マイコン側で短時間待機
-- `A_UNTIL_END_OF_DIALOG`: `A` を 6 回送信
+
+`A_UNTIL_END_OF_DIALOG` は PC 側の論理キーです。シリアル送信時には `A` へ変換されるため、マイコン側では扱いません。
 
 ## ビルド前提
 

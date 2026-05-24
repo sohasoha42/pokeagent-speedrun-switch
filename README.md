@@ -13,9 +13,10 @@ OpenAI の視覚モデルに Nintendo Switch のキャプチャ映像を見せ�
 │   ├── test_openai.py      # OpenAI API 接続を確認する
 │   └── test_serial.py      # 最初に見つかった COM ポートへ A を送る
 ├── firmware/
-│   └── serial-hid-bridge/  # シリアル受信側マイコンコード
+│   └── serial_hid_bridge/  # Raspberry Pi Pico 用シリアル HID ブリッジ
 ├── src/pokeagent_speedrun_switch/
-│   ├── main.py             # キャプチャ、API 呼び出し、入力送信の実行ループ
+│   ├── runner.py           # キャプチャ、API 呼び出し、入力送信の実行ループ
+│   ├── camera.py           # キャプチャデバイス検出
 │   └── harness.py          # プロンプト、状態保存、JSON 正規化、画像変換
 ├── .env.example
 ├── pyproject.toml
@@ -29,6 +30,8 @@ OpenAI の視覚モデルに Nintendo Switch のキャプチャ映像を見せ�
 - OpenAI API キー
 - Nintendo Switch の映像を PC へ取り込めるキャプチャ環境
 - 実入力を送る場合は、シリアル経由でキーを受け取るコントローラブリッジ
+
+マイコン側コードは `firmware/serial_hid_bridge/` にあります。Arduino IDE で扱いやすいように、ディレクトリ名と `.ino` ファイル名を揃えています。
 
 ## セットアップ
 
@@ -54,28 +57,30 @@ OPENAI_REASONING_EFFORT=medium
 
 ## 起動
 
-通常はキャプチャデバイスを自動検出します。検出がうまくいかない場合は、カメラ番号を確認します。
+まずキャプチャデバイスを確認します。
 
 ```powershell
 uv run python scripts/detect_cameras.py
 ```
 
-入力を送信せず、判断内容だけを確認する場合:
+通常は `--camera-index auto` で利用可能なカメラを自動検出します。特定のカメラを使う場合は、上の確認結果を見て `--camera-index 1` のように指定します。
+
+最初は入力を送信せず、モデルの判断と送信予定コマンドだけを確認します。
 
 ```powershell
 uv run pokeagent-speedrun-switch --dry-run
 ```
 
-シリアル入力ブリッジへ送信する場合:
+実機へ入力を送る場合は `--serial` を付けます。COM ポートは既定で自動検出されます。
+
+```powershell
+uv run pokeagent-speedrun-switch --serial
+```
+
+COM ポートを固定したい場合だけ明示します。
 
 ```powershell
 uv run pokeagent-speedrun-switch --serial --serial-port COM3
-```
-
-COM ポートを自動検出する場合:
-
-```powershell
-uv run pokeagent-speedrun-switch --serial --serial-port auto
 ```
 
 ## 実行時の流れ

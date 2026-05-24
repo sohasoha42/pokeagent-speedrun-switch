@@ -171,7 +171,7 @@ void setup() {
   }
 
   switchcontrollerpico_reset();
-  Serial1.println("serial-hid-bridge ready");
+  Serial1.println("serial_hid_bridge ready");
 }
 
 void loop() {

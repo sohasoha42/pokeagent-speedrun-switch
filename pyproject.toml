@@ -1,7 +1,7 @@
 [project]
 name = "pokeagent-speedrun-switch"
 version = "0.1.0"
-description = "Add your description here"
+description = "Visual Pokemon FireRed agent harness for Nintendo Switch capture and serial HID input"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
@@ -23,4 +23,4 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [project.scripts]
-pokeagent-speedrun-switch = "pokeagent_speedrun_switch.main:main"
+pokeagent-speedrun-switch = "pokeagent_speedrun_switch.runner:main"
