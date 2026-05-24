@@ -95,7 +95,7 @@ Core priorities:
 
 Controls:
 - key_press sends one or more keys: A, B, X, Y, UP, DOWN, LEFT, RIGHT, START, SELECT, WAIT.
-- A_UNTIL_END_OF_DIALOG means press A a short bounded number of times to advance dialog/text/battle animations.
+- A_UNTIL_END_OF_DIALOG means press A once, then re-observe before deciding whether another A is needed.
 - Use A_UNTIL_END_OF_DIALOG instead of many individual A presses when text or battle messages are open, but do not rely on it to clear long dialog in one decision.
 - In overworld, use direction sequences instead of one-tile moves when the path is simple. Moving 3-8 tiles is often better than dithering.
 - On naming keyboards, finish by moving to "おわる" and pressing A. Do not use START as a shortcut for name completion.
@@ -104,7 +104,8 @@ Controls:
 Visual policy:
 - If a clear text box, battle text, or confirmation prompt is visible, advancing with A_UNTIL_END_OF_DIALOG is usually appropriate.
 - If no clear text/menu is visible, treat the scene as overworld and prefer movement over A.
-- Use A only for a direct interaction when the player is clearly facing an NPC/object/door/item or confirming a highlighted choice.
+- Use A only for a direct interaction when the player is directly adjacent to, and clearly facing, an NPC/object/door/item, or when confirming a highlighted choice.
+- If the player is not adjacent to the target, or the player's facing direction is uncertain/wrong, move or turn first. Do not include A in the same action unless the final position and facing are clear from the newest screenshot.
 - If recent screenshots look unchanged after the same input, change strategy.
 - Images are provided in chronological order, oldest to newest. Judge the newest frame, but use older frames to detect whether dialog disappeared, whether movement happened, or whether the scene is stuck.
 - Do not assume dialog is still active just because prior frames or history had dialog. The newest frame must visibly contain a text box/menu/battle prompt to classify as dialog/menu/battle.
@@ -119,6 +120,7 @@ Interaction loop policy:
 - If the current screen is overworld and recent history already used A or A_UNTIL_END_OF_DIALOG to talk/check/read, do not press A again while still facing the same person or object.
 - After finishing dialog with a person/object, the next overworld action should usually be movement away from that target or toward the route/objective.
 - Repeatedly talking to the same target is allowed only when a visible prompt/menu/choice requires confirmation, or when an objective explicitly says repeated interaction is required.
+- Overworld A is valid only at interaction range: the player must be on the neighboring tile and facing the target. If there is any gap, diagonal offset, or wrong facing, output only movement/turning first.
 - If unsure whether a conversation just ended, choose a short movement input instead of A.
 
 Memory policy:
@@ -164,7 +166,7 @@ class HarnessConfig:
     history_limit: int = 40
     recent_frames_in_prompt: int = 3
     jpeg_quality: int = 70
-    dialog_a_presses: int = 2
+    dialog_a_presses: int = 1
     inter_key_delay_sec: float = 0.08
     dialog_key_delay_sec: float = 0.18
     dpad_turn_hold_sec: float = 0.08
@@ -583,6 +585,77 @@ def _decision_has_required_overworld_interaction(decision: dict[str, Any]) -> bo
     return any(phrase in text for phrase in required_context)
 
 
+def _decision_has_adjacent_facing_context(decision: dict[str, Any]) -> bool:
+    text = _decision_text(decision)
+
+    negative_context = (
+        "not adjacent",
+        "not next to",
+        "not facing",
+        "wrong facing",
+        "wrong direction",
+        "too far",
+        "far away",
+        "gap",
+        "one or more tiles away",
+        "more than one tile",
+        "diagonal",
+        "approach",
+        "move toward",
+        "move closer",
+        "need to face",
+        "turn toward",
+    )
+    if any(phrase in text for phrase in negative_context):
+        return False
+
+    adjacent_context = (
+        "directly adjacent",
+        "adjacent to",
+        "next to",
+        "neighboring tile",
+        "in front of",
+        "directly in front",
+        "interaction range",
+    )
+    facing_context = (
+        "facing the target",
+        "facing it",
+        "facing him",
+        "facing her",
+        "facing the npc",
+        "facing the object",
+        "facing the door",
+        "facing the pokeball",
+        "correctly facing",
+        "already facing",
+    )
+    return any(phrase in text for phrase in adjacent_context) and any(
+        phrase in text for phrase in facing_context
+    )
+
+
+def _truncate_or_replace_unsafe_overworld_a(
+    history: list[dict[str, Any]],
+    keys: list[str],
+    fallback_move: str | None,
+) -> list[str]:
+    before_a: list[str] = []
+    for key in keys:
+        if key in A_LIKE_KEYS:
+            break
+        if key != "WAIT":
+            before_a.append(key)
+
+    if before_a:
+        return before_a
+
+    move = normalize_key(fallback_move or fallback_movement_for_recent_history(history))
+    if move not in MOVEMENT_KEYS:
+        move = "DOWN"
+    return [move]
+
+
 def fallback_movement_for_recent_history(history: list[dict[str, Any]]) -> str:
     recent_moves: list[str] = []
     for entry in reversed(history[-6:]):
@@ -669,19 +742,39 @@ def guard_against_reinteraction_loop(
     fallback_move: str | None = None,
 ) -> tuple[list[str], str | None]:
     normalized_keys = [normalize_key(key) for key in keys]
-    first_action_key = next((key for key in normalized_keys if key != "WAIT"), "WAIT")
-    if first_action_key not in A_LIKE_KEYS:
+    first_a_index = next(
+        (idx for idx, key in enumerate(normalized_keys) if key in A_LIKE_KEYS),
+        None,
+    )
+    if first_a_index is None:
         return normalized_keys, None
 
     if _decision_has_strong_a_context(decision):
         return normalized_keys, None
 
-    if (
-        normalize_scene_type(decision.get("scene_type", "unclear")) == "overworld"
-        and (
+    if normalize_scene_type(decision.get("scene_type", "unclear")) == "overworld":
+        has_required_context = _decision_has_required_overworld_interaction(decision)
+        has_adjacent_facing_context = _decision_has_adjacent_facing_context(decision)
+        if (
             _has_recent_a_like_without_movement(state.history)
-            or not _decision_has_required_overworld_interaction(decision)
-        )
+            or not has_required_context
+            or not has_adjacent_facing_context
+        ):
+            replacement = _truncate_or_replace_unsafe_overworld_a(
+                state.history,
+                normalized_keys,
+                fallback_move,
+            )
+            note = (
+                "anti-loop guard removed an overworld A-like input because interaction "
+                "requires a clearly adjacent target and correct facing"
+            )
+            return replacement, note
+
+    first_action_key = next((key for key in normalized_keys if key != "WAIT"), "WAIT")
+    if first_action_key in A_LIKE_KEYS and (
+        normalize_scene_type(decision.get("scene_type", "unclear")) == "overworld"
+        and not _decision_has_required_overworld_interaction(decision)
     ):
         move = fallback_move or fallback_movement_for_recent_history(state.history)
         note = (

@@ -93,6 +93,19 @@ def execute_keys(
         time.sleep(config.inter_key_delay_sec)
 
 
+def settle_capture_after_input(
+    cap: cv2.VideoCapture,
+    frame_buffer: deque[np.ndarray],
+    settle_sec: float,
+    drain_frames: int,
+) -> None:
+    frame_buffer.clear()
+    if settle_sec > 0:
+        time.sleep(settle_sec)
+    for _ in range(max(0, drain_frames)):
+        cap.grab()
+
+
 def open_capture(camera_index: str, width: int, height: int) -> cv2.VideoCapture:
     if camera_index.lower() != "auto":
         try:
@@ -222,7 +235,9 @@ def main() -> None:
     parser.add_argument("--serial-port", type=str, default="auto")
     parser.add_argument("--serial-baud", type=int, default=115200)
     parser.add_argument("--data-dir", type=Path, default=Path("gpt_data"))
-    parser.add_argument("--dialog-a-presses", type=int, default=2)
+    parser.add_argument("--dialog-a-presses", type=int, default=1)
+    parser.add_argument("--post-input-settle-sec", type=float, default=0.3)
+    parser.add_argument("--camera-drain-frames", type=int, default=3)
     parser.add_argument("--dpad-turn-hold-sec", type=float, default=0.08)
     parser.add_argument("--dpad-step-hold-sec", type=float, default=0.38)
     parser.add_argument("--dpad-steps-per-move", type=int, default=1)
@@ -293,7 +308,12 @@ def main() -> None:
                     execute_keys(ser, keys, harness_config, args.dry_run or not args.serial)
                     record_step(state, decision, keys, visual_summary)
                     save_state(harness_config, state)
-                    frame_buffer.clear()
+                    settle_capture_after_input(
+                        cap,
+                        frame_buffer,
+                        args.post_input_settle_sec,
+                        args.camera_drain_frames,
+                    )
                     last_sample_ts = 0.0
                     last_keys = keys
                     last_status = decision.get("step_details") or decision.get("chat_message") or "acted"
