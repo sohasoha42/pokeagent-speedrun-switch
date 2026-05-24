@@ -106,10 +106,8 @@ uv run pokeagent-speedrun-switch --serial --serial-port auto
 | `--serial-port` | `auto` | 使用する COM ポート |
 | `--serial-baud` | `115200` | シリアル通信速度 |
 | `--data-dir` | `gpt_data` | 状態ファイルの保存先 |
-| `--dialog-a-presses` | `6` | `A_UNTIL_END_OF_DIALOG` を A 何回分として送るか |
-| `--dpad-turn-hold-sec` | `0.08` | 方向転換用の短い保持秒数 |
-| `--dpad-step-hold-sec` | `0.38` | 方向入力 1 歩分の保持秒数 |
-| `--dpad-steps-per-move` | `1` | 方向入力 1 コマンドで進める歩数。既定では `UP` を `UP:80`, `UP:380` として送信 |
+| `--dpad-turn-hold-sec` | `0.08` | Python 側で送る方向合わせ用の短い保持秒数 |
+| `--dpad-walk-hold-sec` | `1.0` | Python 側で送る歩行用の保持秒数。既定では `UP` を `UP:80`, `UP:1000` として送信 |
 
 ## モデルが使えるキー
 
@@ -130,7 +128,7 @@ WAIT
 A_UNTIL_END_OF_DIALOG
 ```
 
-許可されていないキーは `WAIT` に置き換えられます。`A_UNTIL_END_OF_DIALOG` はダイアログや戦闘メッセージを進めるために、A を複数回押す特殊キーです。
+許可されていないキーは `WAIT` に置き換えられます。`A_UNTIL_END_OF_DIALOG` はダイアログや戦闘メッセージを進める意図を表す論理キーで、HID 送信時は `A` 1 回に変換されます。
 
 ## 状態保存
 

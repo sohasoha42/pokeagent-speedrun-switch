@@ -56,11 +56,13 @@ def send_hid_key(ser: serial.Serial, key: str) -> None:
     ser.flush()
 
 
-def serial_commands_for_key(key: str, config: HarnessConfig) -> list[str]:
+def hid_commands_for_key(key: str, config: HarnessConfig) -> list[str]:
+    if key == "A_UNTIL_END_OF_DIALOG":
+        return ["A"]
     if key in MOVEMENT_KEYS:
-        turn_hold_ms = int(config.dpad_turn_hold_sec * 1000)
-        step_hold_ms = int(config.dpad_step_hold_sec * config.dpad_steps_per_move * 1000)
-        return [f"{key}:{turn_hold_ms}", f"{key}:{step_hold_ms}"]
+        turn_ms = int(config.dpad_turn_hold_sec * 1000)
+        walk_ms = int(config.dpad_walk_hold_sec * 1000)
+        return [f"{key}:{turn_ms}", f"{key}:{walk_ms}"]
     return [key]
 
 
@@ -75,20 +77,12 @@ def execute_keys(
             time.sleep(config.inter_key_delay_sec)
             continue
 
-        if key == "A_UNTIL_END_OF_DIALOG":
-            for _ in range(config.dialog_a_presses):
-                if dry_run or ser is None:
-                    print("would send HID: A", flush=True)
-                else:
-                    send_hid_key(ser, "A")
-                time.sleep(config.dialog_key_delay_sec)
-            continue
-
+        commands = hid_commands_for_key(key, config)
         if dry_run or ser is None:
-            for command in serial_commands_for_key(key, config):
+            for command in commands:
                 print(f"would send HID: {command}", flush=True)
         else:
-            for command in serial_commands_for_key(key, config):
+            for command in commands:
                 send_hid_key(ser, command)
         time.sleep(config.inter_key_delay_sec)
 
@@ -235,12 +229,10 @@ def main() -> None:
     parser.add_argument("--serial-port", type=str, default="auto")
     parser.add_argument("--serial-baud", type=int, default=115200)
     parser.add_argument("--data-dir", type=Path, default=Path("gpt_data"))
-    parser.add_argument("--dialog-a-presses", type=int, default=1)
     parser.add_argument("--post-input-settle-sec", type=float, default=0.3)
     parser.add_argument("--camera-drain-frames", type=int, default=3)
     parser.add_argument("--dpad-turn-hold-sec", type=float, default=0.08)
-    parser.add_argument("--dpad-step-hold-sec", type=float, default=0.38)
-    parser.add_argument("--dpad-steps-per-move", type=int, default=1)
+    parser.add_argument("--dpad-walk-hold-sec", type=float, default=1.0)
     args = parser.parse_args()
 
     api_key = os.getenv("OPENAI_API_KEY")
@@ -249,11 +241,9 @@ def main() -> None:
 
     harness_config = HarnessConfig(
         data_dir=args.data_dir,
-        dialog_a_presses=args.dialog_a_presses,
         recent_frames_in_prompt=args.num_frames,
         dpad_turn_hold_sec=args.dpad_turn_hold_sec,
-        dpad_step_hold_sec=args.dpad_step_hold_sec,
-        dpad_steps_per_move=args.dpad_steps_per_move,
+        dpad_walk_hold_sec=args.dpad_walk_hold_sec,
     )
     state = load_state(harness_config)
     client = OpenAI(api_key=api_key)

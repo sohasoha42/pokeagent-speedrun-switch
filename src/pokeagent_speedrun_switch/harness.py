@@ -29,10 +29,6 @@ ALLOWED_KEYS = {
 MOVEMENT_KEYS = {"UP", "DOWN", "LEFT", "RIGHT"}
 A_LIKE_KEYS = {"A", "A_UNTIL_END_OF_DIALOG"}
 
-SERIAL_KEY_MAP = {
-    "A_UNTIL_END_OF_DIALOG": "A",
-}
-
 SCENE_TYPES = {"overworld", "dialog", "menu", "battle", "transition", "unclear"}
 OBJECT_INTERACTION_TERMS = (
     "bedroom",
@@ -95,8 +91,8 @@ Core priorities:
 
 Controls:
 - key_press sends one or more keys: A, B, X, Y, UP, DOWN, LEFT, RIGHT, START, SELECT, WAIT.
-- A_UNTIL_END_OF_DIALOG means press A once, then re-observe before deciding whether another A is needed.
-- Use A_UNTIL_END_OF_DIALOG instead of many individual A presses when text or battle messages are open, but do not rely on it to clear long dialog in one decision.
+- A_UNTIL_END_OF_DIALOG is a semantic alias for one A press, then re-observe before deciding whether another A is needed.
+- Use A_UNTIL_END_OF_DIALOG when text or battle messages are open, but do not rely on it to clear long dialog in one decision.
 - In overworld, use direction sequences instead of one-tile moves when the path is simple. Moving 3-8 tiles is often better than dithering.
 - On naming keyboards, finish by moving to "おわる" and pressing A. Do not use START as a shortcut for name completion.
 - Do not use SELECT unless there is a clear reason.
@@ -166,12 +162,9 @@ class HarnessConfig:
     history_limit: int = 40
     recent_frames_in_prompt: int = 3
     jpeg_quality: int = 70
-    dialog_a_presses: int = 1
     inter_key_delay_sec: float = 0.08
-    dialog_key_delay_sec: float = 0.18
     dpad_turn_hold_sec: float = 0.08
-    dpad_step_hold_sec: float = 0.38
-    dpad_steps_per_move: int = 1
+    dpad_walk_hold_sec: float = 1.0
 
 
 @dataclass

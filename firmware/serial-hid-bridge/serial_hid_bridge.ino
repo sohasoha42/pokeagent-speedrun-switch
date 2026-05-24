@@ -18,7 +18,6 @@ namespace {
 constexpr unsigned long BAUD_RATE = 115200;
 constexpr uint16_t BUTTON_PRESS_MS = 100;
 constexpr uint16_t HAT_PRESS_MS = 260;
-constexpr uint16_t COMMAND_GAP_MS = 20;
 constexpr size_t MAX_COMMAND_LENGTH = 32;
 constexpr int UART_TX_PIN = 0;  // GP0: Pico -> USB serial adapter RX
 constexpr int UART_RX_PIN = 1;  // GP1: USB serial adapter TX -> Pico
@@ -111,14 +110,6 @@ bool executeCommand(const String& command) {
 
   if (base_command == "WAIT") {
     delay(BUTTON_PRESS_MS);
-    return true;
-  }
-
-  if (base_command == "A_UNTIL_END_OF_DIALOG") {
-    for (int i = 0; i < 6; ++i) {
-      pushButton(Button::A, BUTTON_PRESS_MS, 1);
-      delay(COMMAND_GAP_MS);
-    }
     return true;
   }
 
