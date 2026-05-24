@@ -280,7 +280,7 @@ def main() -> None:
                     )
                     apply_metadata_actions(state, decision["actions"])
                     keys = key_sequence_from_actions(decision["actions"])
-                    keys, stagnation_note = guard_against_stagnation(state, keys, visual_summary)
+                    keys, stagnation_note = guard_against_stagnation(state, decision, keys, visual_summary)
                     keys, guard_note = guard_against_reinteraction_loop(state, decision, keys)
                     guard_notes = [note for note in [stagnation_note, guard_note] if note]
                     if guard_notes:

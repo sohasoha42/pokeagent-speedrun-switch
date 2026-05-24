@@ -38,6 +38,8 @@ SCENE_TYPES = {"overworld", "dialog", "menu", "battle", "transition", "unclear"}
 EARLY_GAME_BOOTSTRAP_GUIDE = """
 Early-game visual route guide:
 - Opening intro/name screens: advance text and prompts normally.
+- On player/rival naming screens, do not use START to finish. Enter the desired short name, move the cursor to the on-screen "おわる" / finish option, then press A to confirm.
+- If a naming keyboard is open and a name has already been entered, the objective is to navigate to "おわる" and press A, not press START.
 - First controllable scene is the player's bedroom. The objective is to leave the room, not inspect furniture.
 - In the bedroom, ignore the PC, TV/SNES, signs, and decorations unless a text box is already open.
 - Bedroom stairs in FireRed are a dark stair/doorway tile on the room edge, often toward the right/upper-right side of the room. Treat dark stair-like edge tiles as the exit target, not as an NPC/sign/object to inspect.
@@ -68,6 +70,7 @@ Controls:
 - A_UNTIL_END_OF_DIALOG means press A repeatedly to advance dialog/text/battle animations.
 - Use A_UNTIL_END_OF_DIALOG instead of many individual A presses when text or battle messages are open.
 - In overworld, use direction sequences instead of one-tile moves when the path is simple. Moving 3-8 tiles is often better than dithering.
+- On naming keyboards, finish by moving to "おわる" and pressing A. Do not use START as a shortcut for name completion.
 - Do not use SELECT unless there is a clear reason.
 
 Visual policy:
@@ -80,6 +83,7 @@ Visual policy:
 - If visual_change_summary says the latest frames changed very little after repeated A-like inputs, avoid more A unless a visible continuation arrow or prompt remains in the newest frame.
 - If stagnation_summary.is_stagnant is true, deliberately choose a different tactic from recent_history: change movement direction, back out with B if in a menu, or wait only for transitions. Do not repeat the same key sequence.
 - Because this harness has no RAM/minimap, use screenshot-based local exploration: infer likely walkable tiles, test a short route, use visual changes to update which directions are blocked, and prefer exits/stairs/doors over interacting with furniture.
+- Exception: when the newest frame clearly shows dialog/text/battle text/confirmation, advancing it with A_UNTIL_END_OF_DIALOG or A is progress, not stagnation. Do not avoid A just because recent frames changed little during dialog.
 
 Interaction loop policy:
 - Talking to an NPC, reading a sign, checking an object, or opening a one-shot message is complete once its text box disappears.
@@ -567,10 +571,14 @@ def alternate_key_for_stagnation(history: list[dict[str, Any]], keys: list[str])
 
 def guard_against_stagnation(
     state: HarnessState,
+    decision: dict[str, Any],
     keys: list[str],
     visual_summary: dict[str, Any],
 ) -> tuple[list[str], str | None]:
     normalized_keys = [normalize_key(key) for key in keys]
+    if _decision_has_strong_a_context(decision):
+        return normalized_keys, None
+
     stagnation = build_stagnation_summary(state.history, visual_summary)
     if not stagnation["is_stagnant"]:
         return normalized_keys, None
@@ -598,6 +606,9 @@ def guard_against_reinteraction_loop(
     normalized_keys = [normalize_key(key) for key in keys]
     first_action_key = next((key for key in normalized_keys if key != "WAIT"), "WAIT")
     if first_action_key not in A_LIKE_KEYS:
+        return normalized_keys, None
+
+    if _decision_has_strong_a_context(decision):
         return normalized_keys, None
 
     if (
