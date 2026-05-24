@@ -34,6 +34,34 @@ SERIAL_KEY_MAP = {
 }
 
 SCENE_TYPES = {"overworld", "dialog", "menu", "battle", "transition", "unclear"}
+OBJECT_INTERACTION_TERMS = (
+    "bedroom",
+    "furniture",
+    "object",
+    "pc",
+    "tv",
+    "snes",
+    "famicom",
+    "console",
+    "game console",
+    "sign",
+    "decoration",
+    "bookshelf",
+    "same object",
+)
+STORY_DIALOG_TERMS = (
+    "professor oak",
+    "oak",
+    "mom",
+    "rival",
+    "name",
+    "naming",
+    "keyboard",
+    "confirmation",
+    "choice",
+    "yes/no",
+    "battle text",
+)
 
 EARLY_GAME_BOOTSTRAP_GUIDE = """
 Early-game visual route guide:
@@ -67,8 +95,8 @@ Core priorities:
 
 Controls:
 - key_press sends one or more keys: A, B, X, Y, UP, DOWN, LEFT, RIGHT, START, SELECT, WAIT.
-- A_UNTIL_END_OF_DIALOG means press A repeatedly to advance dialog/text/battle animations.
-- Use A_UNTIL_END_OF_DIALOG instead of many individual A presses when text or battle messages are open.
+- A_UNTIL_END_OF_DIALOG means press A a short bounded number of times to advance dialog/text/battle animations.
+- Use A_UNTIL_END_OF_DIALOG instead of many individual A presses when text or battle messages are open, but do not rely on it to clear long dialog in one decision.
 - In overworld, use direction sequences instead of one-tile moves when the path is simple. Moving 3-8 tiles is often better than dithering.
 - On naming keyboards, finish by moving to "おわる" and pressing A. Do not use START as a shortcut for name completion.
 - Do not use SELECT unless there is a clear reason.
@@ -87,6 +115,7 @@ Visual policy:
 
 Interaction loop policy:
 - Talking to an NPC, reading a sign, checking an object, or opening a one-shot message is complete once its text box disappears.
+- Text from bedroom furniture, the PC, TV/SNES/Famicom, signs, or decorations is one-shot flavor text. After advancing it once, stop pressing A and move away unless a story NPC, menu, naming keyboard, or confirmation prompt is clearly visible.
 - If the current screen is overworld and recent history already used A or A_UNTIL_END_OF_DIALOG to talk/check/read, do not press A again while still facing the same person or object.
 - After finishing dialog with a person/object, the next overworld action should usually be movement away from that target or toward the route/objective.
 - Repeatedly talking to the same target is allowed only when a visible prompt/menu/choice requires confirmation, or when an objective explicitly says repeated interaction is required.
@@ -135,7 +164,7 @@ class HarnessConfig:
     history_limit: int = 40
     recent_frames_in_prompt: int = 3
     jpeg_quality: int = 70
-    dialog_a_presses: int = 6
+    dialog_a_presses: int = 2
     inter_key_delay_sec: float = 0.08
     dialog_key_delay_sec: float = 0.18
     dpad_turn_hold_sec: float = 0.08
@@ -443,18 +472,50 @@ def _has_recent_a_like_without_movement(history: list[dict[str, Any]], lookback:
     return saw_a_like
 
 
-def _decision_has_strong_a_context(decision: dict[str, Any]) -> bool:
-    scene_type = normalize_scene_type(decision.get("scene_type", "unclear"))
-    if scene_type == "overworld":
-        return False
-    if scene_type in {"dialog", "menu", "battle"}:
-        return True
-
-    text = (
+def _decision_text(decision: dict[str, Any]) -> str:
+    return (
         str(decision.get("chat_message", ""))
         + " "
         + str(decision.get("step_details", ""))
     ).lower()
+
+
+def _decision_mentions_object_interaction(decision: dict[str, Any]) -> bool:
+    text = _decision_text(decision)
+    return any(term in text for term in OBJECT_INTERACTION_TERMS)
+
+
+def _decision_mentions_story_dialog(decision: dict[str, Any]) -> bool:
+    text = _decision_text(decision)
+    return any(term in text for term in STORY_DIALOG_TERMS)
+
+
+def _is_repeated_static_object_dialog(
+    state: HarnessState,
+    decision: dict[str, Any],
+    visual_summary: dict[str, Any],
+) -> bool:
+    if normalize_scene_type(decision.get("scene_type", "unclear")) != "dialog":
+        return False
+    if not _decision_mentions_object_interaction(decision):
+        return False
+    if _decision_mentions_story_dialog(decision):
+        return False
+
+    stagnation = build_stagnation_summary(state.history, visual_summary)
+    return bool(stagnation["low_change_now"] and stagnation["recent_a_like_count"] >= 2)
+
+
+def _decision_has_strong_a_context(decision: dict[str, Any]) -> bool:
+    scene_type = normalize_scene_type(decision.get("scene_type", "unclear"))
+    if scene_type == "overworld":
+        return False
+    if _decision_mentions_object_interaction(decision) and not _decision_mentions_story_dialog(decision):
+        return False
+    if scene_type in {"dialog", "menu", "battle"}:
+        return True
+
+    text = _decision_text(decision)
 
     negative_context = (
         "no dialog",
@@ -490,11 +551,7 @@ def _decision_has_strong_a_context(decision: dict[str, Any]) -> bool:
 
 
 def _decision_has_required_overworld_interaction(decision: dict[str, Any]) -> bool:
-    text = (
-        str(decision.get("chat_message", ""))
-        + " "
-        + str(decision.get("step_details", ""))
-    ).lower()
+    text = _decision_text(decision)
 
     blocked_context = (
         "bedroom",
@@ -576,6 +633,14 @@ def guard_against_stagnation(
     visual_summary: dict[str, Any],
 ) -> tuple[list[str], str | None]:
     normalized_keys = [normalize_key(key) for key in keys]
+    if _is_repeated_static_object_dialog(state, decision, visual_summary):
+        replacement = fallback_movement_for_recent_history(state.history)
+        note = (
+            "stagnation guard changed repeated object-dialog advancement to movement "
+            "because recent A-like inputs did not produce visual progress"
+        )
+        return [normalize_key(replacement)], note
+
     if _decision_has_strong_a_context(decision):
         return normalized_keys, None
 
