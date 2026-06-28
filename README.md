@@ -90,8 +90,9 @@ uv run pokeagent-speedrun-switch --serial --serial-port COM3
 3. フルスクリーンのフレーム、履歴、メモリ、目標を OpenAI Responses API へ送ります。
 4. モデルは `chat_message`、`step_details`、`actions` を含む JSON を返します。
 5. `actions` のうち `key_press` がキー列へ変換されます。
-6. `--serial` が有効ならシリアルポートへ送信します。無効または `--dry-run` なら標準出力へ表示します。
-7. 判断履歴と状態が `gpt_data/` に保存されます。
+6. `add_marker` / `delete_marker` / `write_memory` / `update_objectives` などのメタデータ操作を状態へ反映します。
+7. `--serial` が有効ならシリアルポートへ送信します。無効または `--dry-run` なら標準出力へ表示します。
+8. 判断履歴と状態が `gpt_data/` に保存されます。
 
 ## 主なオプション
 
@@ -105,7 +106,10 @@ uv run pokeagent-speedrun-switch --serial --serial-port COM3
 | `--num-frames` | `3` | 1 回の判断で使う直近フレーム数 |
 | `--model` | `OPENAI_MODEL` または `gpt-5.4-mini` | 使用する OpenAI モデル |
 | `--reasoning-effort` | `OPENAI_REASONING_EFFORT` または `medium` | reasoning effort |
-| `--detail` | `low` | 画像入力の detail。`low`、`high`、`auto` |
+| `--detail` | `high` | 画像入力の detail。`low`、`high`、`auto` |
+| `--jpeg-quality` | `90` | モデル送信画像と診断保存画像の JPEG 品質 |
+| `--include-latest-game-view` / `--no-include-latest-game-view` | 有効 | 最新フレームから自動抽出したゲーム画面拡大を追加送信 |
+| `--save-prompt-frames` / `--no-save-prompt-frames` | 有効 | モデルへ渡した直近画像を `gpt_data/debug_frames/` に保存 |
 | `--serial` | 無効 | シリアルポートへ入力を送信 |
 | `--dry-run` | 無効 | 入力を送信せず、送信予定のキーだけ表示 |
 | `--serial-port` | `auto` | 使用する COM ポート |
@@ -143,9 +147,18 @@ A_UNTIL_END_OF_DIALOG
 | --- | --- |
 | `memory.json` | 画面だけでは分からない永続メモ |
 | `objectives.json` | 現在の中期目標 |
-| `markers.json` | モデルが追加した進行マーカー |
+| `maps.json` | マップごとの座標付きマーカー |
+| `markers.json` | 全マップをまたいだマーカー一覧 |
 | `history.json` | 直近の判断、キー、エラー |
 | `counters.json` | ステップ番号 |
+
+モデルは `add_marker` でマップ上の目印を追加できます。座標はRAM由来ではなく、画面観察からのローカルな推定座標です。
+
+```json
+{"type":"add_marker","map_id":"pallet_town","map_name":"Pallet Town","x":5,"y":8,"emoji":"door","label":"Player house front door."}
+```
+
+同じ `map_id` / `x` / `y` のマーカーは上書きされます。不要になったマーカーは `delete_marker` で削除できます。
 
 新しい試行として始めたい場合は、プログラムを終了してから `gpt_data/` を別名にするか削除します。
 

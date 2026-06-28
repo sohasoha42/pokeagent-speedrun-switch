@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import time
 from collections import deque
@@ -23,6 +24,11 @@ from .harness import (
     apply_metadata_actions,
     build_visual_change_summary,
     build_user_content,
+    extract_game_view_bgr,
+    guard_against_doorway_route_loop,
+    guard_against_lateral_ledge_loop,
+    guard_against_one_way_ledge,
+    guard_against_premature_lateral_reversal,
     guard_against_reinteraction_loop,
     guard_against_stagnation,
     key_sequence_from_actions,
@@ -30,6 +36,7 @@ from .harness import (
     normalize_decision,
     parse_json_safely,
     save_state,
+    upscale_for_prompt,
 )
 
 load_dotenv()
@@ -190,6 +197,58 @@ def call_agent(
     return normalize_decision(parse_json_safely(response_text(resp)))
 
 
+def save_prompt_frame_debug(
+    frames: list[np.ndarray],
+    config: HarnessConfig,
+    detail: str,
+    step: int,
+    enabled: bool,
+) -> None:
+    if not enabled:
+        return
+
+    debug_dir = config.data_dir / "debug_frames"
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    selected = frames[-config.recent_frames_in_prompt :]
+    written: list[str] = []
+    for index, frame in enumerate(selected, start=1):
+        path = debug_dir / f"latest_frame_{index}_full.jpg"
+        cv2.imwrite(
+            str(path),
+            frame,
+            [int(cv2.IMWRITE_JPEG_QUALITY), config.jpeg_quality],
+        )
+        written.append(path.name)
+
+    game_view_status = "not_detected"
+    if config.include_latest_game_view and selected:
+        game_view = extract_game_view_bgr(selected[-1])
+        if game_view is not None:
+            game_view = upscale_for_prompt(game_view, config.game_view_min_width)
+            path = debug_dir / "latest_game_view_zoom.jpg"
+            cv2.imwrite(
+                str(path),
+                game_view,
+                [int(cv2.IMWRITE_JPEG_QUALITY), config.jpeg_quality],
+            )
+            written.append(path.name)
+            game_view_status = f"{game_view.shape[1]}x{game_view.shape[0]}"
+
+    metadata = {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "step": step,
+        "detail": detail,
+        "jpeg_quality": config.jpeg_quality,
+        "include_latest_game_view": config.include_latest_game_view,
+        "game_view_status": game_view_status,
+        "files": written,
+    }
+    (debug_dir / "latest_metadata.json").write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
 def record_step(
     state: HarnessState,
     decision: dict[str, Any],
@@ -223,7 +282,10 @@ def main() -> None:
     parser.add_argument("--num-frames", type=int, default=3)
     parser.add_argument("--model", type=str, default=os.getenv("OPENAI_MODEL", "gpt-5.4-mini"))
     parser.add_argument("--reasoning-effort", type=str, default=os.getenv("OPENAI_REASONING_EFFORT", "medium"))
-    parser.add_argument("--detail", type=str, default="low", choices=["low", "high", "auto"])
+    parser.add_argument("--detail", type=str, default="high", choices=["low", "high", "auto"])
+    parser.add_argument("--jpeg-quality", type=int, default=90)
+    parser.add_argument("--include-latest-game-view", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--save-prompt-frames", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--serial", action="store_true", help="Send selected keys to the serial controller bridge.")
     parser.add_argument("--dry-run", action="store_true", help="Plan actions but do not send serial inputs.")
     parser.add_argument("--serial-port", type=str, default="auto")
@@ -242,6 +304,8 @@ def main() -> None:
     harness_config = HarnessConfig(
         data_dir=args.data_dir,
         recent_frames_in_prompt=args.num_frames,
+        jpeg_quality=args.jpeg_quality,
+        include_latest_game_view=args.include_latest_game_view,
         dpad_turn_hold_sec=args.dpad_turn_hold_sec,
         dpad_walk_hold_sec=args.dpad_walk_hold_sec,
     )
@@ -274,6 +338,13 @@ def main() -> None:
             if ready and due:
                 visual_summary = build_visual_change_summary(list(frame_buffer))
                 try:
+                    save_prompt_frame_debug(
+                        list(frame_buffer),
+                        harness_config,
+                        args.detail,
+                        int(state.counters.get("current_step", 0)),
+                        args.save_prompt_frames,
+                    )
                     decision = call_agent(
                         client=client,
                         model=args.model,
@@ -286,8 +357,23 @@ def main() -> None:
                     apply_metadata_actions(state, decision["actions"])
                     keys = key_sequence_from_actions(decision["actions"])
                     keys, stagnation_note = guard_against_stagnation(state, decision, keys, visual_summary)
+                    keys, ledge_note = guard_against_one_way_ledge(state, decision, keys)
+                    keys, ledge_opening_note = guard_against_lateral_ledge_loop(state, decision, keys)
+                    keys, lateral_reversal_note = guard_against_premature_lateral_reversal(state, decision, keys)
+                    keys, doorway_note = guard_against_doorway_route_loop(state, decision, keys)
                     keys, guard_note = guard_against_reinteraction_loop(state, decision, keys)
-                    guard_notes = [note for note in [stagnation_note, guard_note] if note]
+                    guard_notes = [
+                        note
+                        for note in [
+                            stagnation_note,
+                            ledge_note,
+                            ledge_opening_note,
+                            lateral_reversal_note,
+                            doorway_note,
+                            guard_note,
+                        ]
+                        if note
+                    ]
                     if guard_notes:
                         decision["step_details"] = (
                             (decision.get("step_details") or "").rstrip()

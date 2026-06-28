@@ -10,11 +10,12 @@ if not ports:
 port = ports[0].device
 print(f"Using port: {port}")
 
-ser = serial.Serial(port, 115200, timeout=1)
-time.sleep(2)
+while True:
+    ser = serial.Serial(port, 115200, timeout=1)
+    time.sleep(2)
 
-ser.write(b"A\n")
-ser.flush()
-ser.close()
+    ser.write(b"A\n")
+    ser.flush()
+    ser.close()
 
-print("Sent: A")
+    print("Sent: A")
